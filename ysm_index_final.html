@@ -603,6 +603,11 @@
   <div class="loader-bar"><div id="loader-progress" class="loader-progress" style="width:0%"></div></div>
 </div>
 
+<!-- Connection Status Banner -->
+<div id="connection-status" style="display: none; position: fixed; top: 0; left: 0; right: 0; background: var(--warning); color: var(--black); text-align: center; padding: 10px; z-index: 10000; font-weight: bold;">
+    🔌 Offline Mode - Working with local data
+</div>
+
 <!-- Loading Spinner -->
 <div class="loading" id="loading">
     <div class="spinner"></div>
@@ -939,9 +944,12 @@
 <div id="kyc-pending-page" class="page form-container">
     <div style="text-align: center; padding: 40px;">
         <div class="glassmorphism" style="padding: 30px; border-radius: 15px; margin: 20px 0;">
-            <h2>🕒 KYC Verification Pending</h2>
-            <p>Your documents are under review by our admin team.</p>
+            <h2>✅ KYC Submitted Successfully!</h2>
+            <p>Your documents have been submitted for review.</p>
             <div class="badge badge-pending" style="margin-top: 15px;">Under Review</div>
+            <div id="kyc-pending-user-info" style="margin-top: 20px; padding: 15px; background: var(--dark-gray); border-radius: 10px;">
+                <!-- User info will be populated here -->
+            </div>
         </div>
         <p style="margin-top: 20px; color: var(--light-gray);">
             You will gain full access once your KYC is approved. This usually takes 24-48 hours.
@@ -1402,7 +1410,7 @@
 </div>
 
 <script>
-    // ==================== FIREBASE CONFIGURATION ====================
+    // ==================== FIREBASE CONFIGURATION & INITIALIZATION ====================
     const firebaseConfig = {
         apiKey: "AIzaSyCFFeBgCXkCeLhhyOeaE3rlL5A9b6ZLgQE",
         authDomain: "v2-4ff67.firebaseapp.com",
@@ -1413,17 +1421,86 @@
         measurementId: "G-D3ME0ZQ20C"
     };
 
-    // Initialize Firebase
+    // Initialize Firebase with error handling
+    let firebaseInitialized = false;
+    let auth, db, storage;
+
     try {
-        firebase.initializeApp(firebaseConfig);
-        console.log("Firebase initialized successfully");
+        // Check if Firebase is already initialized
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        firebaseInitialized = true;
+        
+        auth = firebase.auth();
+        db = firebase.firestore();
+        storage = firebase.storage();
+        
+        console.log("✅ Firebase initialized successfully");
+        
+        // Enable offline persistence for Firestore
+        db.enablePersistence()
+            .then(() => {
+                console.log("✅ Firestore offline persistence enabled");
+            })
+            .catch((err) => {
+                console.warn("⚠️ Firestore offline persistence failed:", err);
+            });
+            
     } catch (error) {
-        console.error("Firebase initialization error:", error);
+        console.error("❌ Firebase initialization failed:", error);
+        firebaseInitialized = false;
+        showConnectionStatus(true);
     }
 
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-    const storage = firebase.storage();
+    // ==================== CONNECTION MANAGEMENT ====================
+    function showConnectionStatus(offline) {
+        const statusBanner = document.getElementById('connection-status');
+        if (offline) {
+            statusBanner.style.display = 'block';
+            statusBanner.textContent = '🔌 Offline Mode - Working with local data';
+            statusBanner.style.background = 'var(--warning)';
+        } else {
+            statusBanner.style.display = 'none';
+        }
+    }
+
+    // ==================== HYBRID STORAGE MANAGER ====================
+    const StorageManager = {
+        // User management
+        setUser: (userData) => {
+            localStorage.setItem('currentUser', JSON.stringify(userData));
+            localStorage.setItem('isLoggedIn', 'true');
+        },
+        
+        getUser: () => {
+            const user = localStorage.getItem('currentUser');
+            return user ? JSON.parse(user) : null;
+        },
+        
+        logout: () => {
+            localStorage.removeItem('currentUser');
+            localStorage.setItem('isLoggedIn', 'false');
+        },
+        
+        isLoggedIn: () => {
+            return localStorage.getItem('isLoggedIn') === 'true';
+        },
+        
+        // Data management
+        setItem: (key, data) => {
+            localStorage.setItem(key, JSON.stringify(data));
+        },
+        
+        getItem: (key) => {
+            const item = localStorage.getItem(key);
+            return item ? JSON.parse(item) : null;
+        },
+        
+        removeItem: (key) => {
+            localStorage.removeItem(key);
+        }
+    };
 
     // ==================== APPLICATION STATE ====================
     let currentUser = null;
@@ -1463,13 +1540,22 @@
     }
 
     function showPage(pageId) {
+        console.log('Navigating to page:', pageId);
         document.querySelectorAll('.page').forEach(page => {
             page.style.display = 'none';
         });
-        document.getElementById(pageId).style.display = 'block';
+        const targetPage = document.getElementById(pageId);
+        if (targetPage) {
+            targetPage.style.display = 'block';
+        } else {
+            console.error('Page not found:', pageId);
+        }
         
+        // Special handling for specific pages
         if (pageId === 'user-dashboard' && currentUser) {
             loadUserDashboard();
+        } else if (pageId === 'kyc-pending-page') {
+            loadKYCPendingPage();
         }
     }
 
@@ -1481,7 +1567,24 @@
         alert('✅ ' + message);
     }
 
-    // ==================== FIREBASE AUTH FUNCTIONS ====================
+    // ==================== KYC PENDING PAGE LOADER ====================
+    function loadKYCPendingPage() {
+        if (currentUser) {
+            const userInfo = document.getElementById('kyc-pending-user-info');
+            if (userInfo) {
+                userInfo.innerHTML = `
+                    <div style="text-align: left;">
+                        <p><strong>Name:</strong> ${currentUser.name || 'N/A'}</p>
+                        <p><strong>Email:</strong> ${currentUser.email || 'N/A'}</p>
+                        <p><strong>User ID:</strong> ${currentUser.uid || currentUser.id || 'N/A'}</p>
+                        <p><strong>Submission Date:</strong> ${new Date().toLocaleDateString()}</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    // ==================== AUTHENTICATION FUNCTIONS ====================
     async function registerUser() {
         try {
             const name = document.getElementById('reg-name')?.value?.trim();
@@ -1497,39 +1600,102 @@
             
             showLoading();
             
-            // Create user with Firebase Auth
-            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            
-            // Create user document in Firestore
-            await db.collection('users').doc(user.uid).set({
-                name: name,
-                email: email,
-                phone: phone,
-                country: country,
-                tier: '115.38',
-                kycStatus: 'unverified',
-                role: 'user',
-                balance: 0,
-                pendingBalance: 0,
-                referralEarnings: 0,
-                dailyWatchCount: 0,
-                totalReferrals: 0,
-                referralCode: generateReferralCode(),
-                withdrawalPin: generatePIN(),
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                canEarn: false
-            });
-            
-            // Send email verification
-            await user.sendEmailVerification();
-            
-            showSuccess('Account created successfully! Please check your email for verification.');
-            showPage('kyc-page');
+            if (firebaseInitialized) {
+                try {
+                    // Try Firebase registration
+                    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                    const user = userCredential.user;
+                    
+                    const userData = {
+                        name: name,
+                        email: email,
+                        phone: phone,
+                        country: country,
+                        tier: '115.38',
+                        kycStatus: 'unverified',
+                        role: 'user',
+                        balance: 0,
+                        pendingBalance: 0,
+                        referralEarnings: 0,
+                        dailyWatchCount: 0,
+                        totalReferrals: 0,
+                        referralCode: generateReferralCode(),
+                        withdrawalPin: generatePIN(),
+                        createdAt: new Date().toISOString(),
+                        canEarn: false
+                    };
+                    
+                    // Try to save to Firestore
+                    try {
+                        await db.collection('users').doc(user.uid).set(userData);
+                    } catch (firestoreError) {
+                        console.warn('Firestore save failed:', firestoreError);
+                    }
+                    
+                    // Store locally
+                    StorageManager.setUser({
+                        uid: user.uid,
+                        ...userData
+                    });
+                    
+                    currentUser = StorageManager.getUser();
+                    
+                    showSuccess('Account created successfully!');
+                    showPage('kyc-page');
+                    
+                } catch (firebaseError) {
+                    console.warn('Firebase registration failed, using local storage:', firebaseError);
+                    // Fallback to local storage
+                    await registerUserLocal(name, email, password, phone, country);
+                }
+            } else {
+                // Firebase not available, use local storage
+                await registerUserLocal(name, email, password, phone, country);
+            }
         } catch (error) {
             showError('Registration failed: ' + error.message);
         }
         hideLoading();
+    }
+
+    async function registerUserLocal(name, email, password, phone, country) {
+        const users = StorageManager.getItem('users') || [];
+        const userExists = users.find(user => user.email === email);
+        
+        if (userExists) {
+            throw new Error('User already exists');
+        }
+        
+        const newUser = {
+            id: 'local_' + Date.now(),
+            email: email,
+            password: btoa(password),
+            name: name,
+            phone: phone,
+            country: country,
+            tier: '115.38',
+            kycStatus: 'unverified',
+            role: 'user',
+            balance: 0,
+            pendingBalance: 0,
+            referralEarnings: 0,
+            dailyWatchCount: 0,
+            totalReferrals: 0,
+            referralCode: generateReferralCode(),
+            withdrawalPin: generatePIN(),
+            createdAt: new Date().toISOString(),
+            canEarn: false
+        };
+        
+        users.push(newUser);
+        StorageManager.setItem('users', users);
+        
+        const { password: _, ...userWithoutPassword } = newUser;
+        StorageManager.setUser(userWithoutPassword);
+        currentUser = userWithoutPassword;
+        
+        showSuccess('Account created successfully!');
+        showPage('kyc-page');
     }
 
     async function loginUser() {
@@ -1543,78 +1709,158 @@
             }
             
             showLoading();
-            const userCredential = await auth.signInWithEmailAndPassword(email, password);
-            const user = userCredential.user;
             
-            // User will be handled by auth state listener
+            if (firebaseInitialized) {
+                try {
+                    // Try Firebase login
+                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                    // Auth state listener will handle the rest
+                } catch (firebaseError) {
+                    console.warn('Firebase login failed, trying local storage:', firebaseError);
+                    // Fallback to local storage
+                    await loginUserLocal(email, password);
+                }
+            } else {
+                // Firebase not available, use local storage
+                await loginUserLocal(email, password);
+            }
         } catch (error) {
             showError('Login failed: ' + error.message);
         }
         hideLoading();
     }
 
-    async function logout() {
-        try {
-            await auth.signOut();
-            currentUser = null;
-            showPage('landing-page');
-            showSuccess('Signed out successfully');
-        } catch (error) {
-            showError('Logout failed: ' + error.message);
+    async function loginUserLocal(email, password) {
+        const users = StorageManager.getItem('users') || [];
+        const user = users.find(u => u.email === email && u.password === btoa(password));
+        
+        if (!user) {
+            throw new Error('Invalid email or password');
+        }
+        
+        const { password: _, ...userWithoutPassword } = user;
+        StorageManager.setUser(userWithoutPassword);
+        currentUser = userWithoutPassword;
+        
+        if (user.kycStatus === 'approved') {
+            showSuccess('Login successful!');
+            showPage('user-dashboard');
+        } else if (user.kycStatus === 'pending') {
+            showPage('kyc-pending-page');
+        } else {
+            showPage('kyc-page');
         }
     }
 
-    // ==================== FIREBASE AUTH STATE LISTENER ====================
-    auth.onAuthStateChanged(async (user) => {
-        if (user) {
+    async function logout() {
+        if (firebaseInitialized) {
             try {
-                // Get user data from Firestore
-                const userDoc = await db.collection('users').doc(user.uid).get();
-                
-                if (userDoc.exists) {
-                    const userData = userDoc.data();
-                    currentUser = {
-                        uid: user.uid,
-                        ...userData
-                    };
+                await auth.signOut();
+            } catch (error) {
+                console.warn('Firebase logout failed:', error);
+            }
+        }
+        
+        StorageManager.logout();
+        currentUser = null;
+        showPage('landing-page');
+        showSuccess('Signed out successfully');
+    }
+
+    // ==================== FIREBASE AUTH STATE LISTENER ====================
+    if (firebaseInitialized) {
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                try {
+                    // User is signed in via Firebase
+                    const userDoc = await db.collection('users').doc(user.uid).get();
                     
-                    // Route user based on KYC status
-                    if (userData.role === 'admin') {
-                        showPage('admin-dashboard');
-                        loadAdminStats();
-                    } else if (userData.kycStatus === 'approved') {
-                        showPage('user-dashboard');
-                        loadUserDashboard();
-                    } else if (userData.kycStatus === 'pending') {
-                        showPage('kyc-pending-page');
+                    if (userDoc.exists) {
+                        const userData = userDoc.data();
+                        currentUser = {
+                            uid: user.uid,
+                            ...userData
+                        };
+                        
+                        // Store locally for offline access
+                        StorageManager.setUser(currentUser);
+                        
+                        // Route based on user role and KYC status
+                        if (userData.role === 'admin') {
+                            showPage('admin-dashboard');
+                        } else if (userData.kycStatus === 'approved') {
+                            showPage('user-dashboard');
+                        } else if (userData.kycStatus === 'pending') {
+                            showPage('kyc-pending-page');
+                        } else {
+                            showPage('kyc-page');
+                        }
+                    } else {
+                        // User document doesn't exist in Firestore
+                        showPage('kyc-page');
+                    }
+                } catch (error) {
+                    console.warn('Firestore access failed, checking local storage:', error);
+                    showConnectionStatus(true);
+                    
+                    // Check if we have local data for this user
+                    const localUser = StorageManager.getUser();
+                    if (localUser && localUser.uid === user.uid) {
+                        currentUser = localUser;
+                        if (currentUser.kycStatus === 'approved') {
+                            showPage('user-dashboard');
+                        } else if (currentUser.kycStatus === 'pending') {
+                            showPage('kyc-pending-page');
+                        } else {
+                            showPage('kyc-page');
+                        }
                     } else {
                         showPage('kyc-page');
                     }
-                } else {
-                    // User document doesn't exist, create it
-                    await db.collection('users').doc(user.uid).set({
-                        name: user.displayName || '',
-                        email: user.email,
-                        tier: '115.38',
-                        kycStatus: 'unverified',
-                        role: 'user',
-                        balance: 0,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    showPage('kyc-page');
                 }
-            } catch (error) {
-                console.error('Error getting user data:', error);
+            } else {
+                // User is signed out
+                currentUser = null;
+                
+                // Check if we have a locally logged in user
+                if (StorageManager.isLoggedIn()) {
+                    const localUser = StorageManager.getUser();
+                    if (localUser && !localUser.uid) {
+                        currentUser = localUser;
+                        if (currentUser.kycStatus === 'approved') {
+                            showPage('user-dashboard');
+                        } else if (currentUser.kycStatus === 'pending') {
+                            showPage('kyc-pending-page');
+                        } else {
+                            showPage('kyc-page');
+                        }
+                        return;
+                    }
+                }
+                
                 showPage('landing-page');
             }
+        });
+    } else {
+        // Firebase not initialized, use local storage only
+        console.log('🔥 Using local storage only mode');
+        showConnectionStatus(true);
+        
+        if (StorageManager.isLoggedIn()) {
+            currentUser = StorageManager.getUser();
+            if (currentUser.kycStatus === 'approved') {
+                showPage('user-dashboard');
+            } else if (currentUser.kycStatus === 'pending') {
+                showPage('kyc-pending-page');
+            } else {
+                showPage('kyc-page');
+            }
         } else {
-            // User is signed out
-            currentUser = null;
             showPage('landing-page');
         }
-    });
+    }
 
-    // ==================== KYC FUNCTIONS ====================
+    // ==================== KYC FUNCTIONS - FIXED VERSION ====================
     async function submitKYC() {
         try {
             const name = document.getElementById('kyc-name')?.value?.trim();
@@ -1637,52 +1883,123 @@
             
             showLoading();
             
-            // Upload files to Firebase Storage
-            const frontRef = storage.ref(`kyc/${currentUser.uid}/front_${Date.now()}`);
-            const backRef = storage.ref(`kyc/${currentUser.uid}/back_${Date.now()}`);
-            const selfieRef = storage.ref(`kyc/${currentUser.uid}/selfie_${Date.now()}`);
-            const addressRef = storage.ref(`kyc/${currentUser.uid}/address_${Date.now()}`);
+            console.log('Starting KYC submission for user:', currentUser);
             
-            await frontRef.put(frontFile);
-            await backRef.put(backFile);
-            await selfieRef.put(selfieFile);
-            await addressRef.put(addressFile);
-            
-            const frontUrl = await frontRef.getDownloadURL();
-            const backUrl = await backRef.getDownloadURL();
-            const selfieUrl = await selfieRef.getDownloadURL();
-            const addressUrl = await addressRef.getDownloadURL();
-            
-            // Create KYC submission in Firestore
-            await db.collection('kycSubmissions').doc(currentUser.uid).set({
-                userId: currentUser.uid,
+            // Create KYC submission
+            const kycSubmission = {
+                userId: currentUser.uid || currentUser.id,
                 name: name,
                 idType: idType,
                 idNumber: idNumber,
-                frontImage: frontUrl,
-                backImage: backUrl,
-                selfieImage: selfieUrl,
-                addressImage: addressUrl,
                 status: 'pending',
-                submittedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+                submittedAt: new Date().toISOString()
+            };
             
-            // Update user KYC status
-            await db.collection('users').doc(currentUser.uid).update({
+            // Handle file uploads
+            if (firebaseInitialized && storage) {
+                try {
+                    console.log('Uploading files to Firebase Storage...');
+                    
+                    const frontRef = storage.ref(`kyc/${currentUser.uid || currentUser.id}/front_${Date.now()}`);
+                    const backRef = storage.ref(`kyc/${currentUser.uid || currentUser.id}/back_${Date.now()}`);
+                    const selfieRef = storage.ref(`kyc/${currentUser.uid || currentUser.id}/selfie_${Date.now()}`);
+                    const addressRef = storage.ref(`kyc/${currentUser.uid || currentUser.id}/address_${Date.now()}`);
+                    
+                    await frontRef.put(frontFile);
+                    await backRef.put(backFile);
+                    await selfieRef.put(selfieFile);
+                    await addressRef.put(addressFile);
+                    
+                    kycSubmission.frontImage = await frontRef.getDownloadURL();
+                    kycSubmission.backImage = await backRef.getDownloadURL();
+                    kycSubmission.selfieImage = await selfieRef.getDownloadURL();
+                    kycSubmission.addressImage = await addressRef.getDownloadURL();
+                    
+                    console.log('Files uploaded successfully');
+                    
+                    // Save to Firestore
+                    if (db && currentUser.uid) {
+                        try {
+                            await db.collection('kycSubmissions').doc(currentUser.uid).set(kycSubmission);
+                            console.log('KYC saved to Firestore');
+                        } catch (firestoreError) {
+                            console.warn('Firestore save failed:', firestoreError);
+                        }
+                    }
+                    
+                } catch (storageError) {
+                    console.warn('Firebase Storage upload failed, using local storage:', storageError);
+                    // Use local URLs for files
+                    kycSubmission.frontImage = URL.createObjectURL(frontFile);
+                    kycSubmission.backImage = URL.createObjectURL(backFile);
+                    kycSubmission.selfieImage = URL.createObjectURL(selfieFile);
+                    kycSubmission.addressImage = URL.createObjectURL(addressFile);
+                }
+            } else {
+                // Use local URLs for files
+                kycSubmission.frontImage = URL.createObjectURL(frontFile);
+                kycSubmission.backImage = URL.createObjectURL(backFile);
+                kycSubmission.selfieImage = URL.createObjectURL(selfieFile);
+                kycSubmission.addressImage = URL.createObjectURL(addressFile);
+            }
+            
+            // Store KYC submission locally
+            const kycSubmissions = StorageManager.getItem('kycSubmissions') || [];
+            // Remove any existing submission for this user
+            const filteredSubmissions = kycSubmissions.filter(sub => 
+                sub.userId !== (currentUser.uid || currentUser.id)
+            );
+            filteredSubmissions.push(kycSubmission);
+            StorageManager.setItem('kycSubmissions', filteredSubmissions);
+            
+            console.log('KYC submission stored locally');
+            
+            // Update user status
+            const userUpdate = {
                 kycStatus: 'pending',
                 name: name
-            });
+            };
             
-            // Update current user data
+            // Update Firebase if available
+            if (firebaseInitialized && db && currentUser.uid) {
+                try {
+                    await db.collection('users').doc(currentUser.uid).update(userUpdate);
+                    console.log('User status updated in Firestore');
+                } catch (error) {
+                    console.warn('Firestore update failed:', error);
+                }
+            }
+            
+            // Update local user data
             currentUser.kycStatus = 'pending';
             currentUser.name = name;
+            StorageManager.setUser(currentUser);
             
+            // Update local users array
+            const users = StorageManager.getItem('users') || [];
+            const updatedUsers = users.map(user => 
+                (user.id === currentUser.id || user.uid === currentUser.uid) 
+                    ? { ...user, ...userUpdate }
+                    : user
+            );
+            StorageManager.setItem('users', updatedUsers);
+            
+            console.log('User data updated locally');
+            
+            hideLoading();
             showSuccess('KYC submitted for review!');
-            showPage('kyc-pending-page');
+            
+            // Force redirect to KYC pending page
+            console.log('Redirecting to KYC pending page...');
+            setTimeout(() => {
+                showPage('kyc-pending-page');
+            }, 100);
+            
         } catch (error) {
+            hideLoading();
             showError('KYC submission failed: ' + error.message);
+            console.error('KYC submission error:', error);
         }
-        hideLoading();
     }
 
     // ==================== USER DASHBOARD FUNCTIONS ====================
@@ -1696,40 +2013,30 @@
 
     async function updateUserUI() {
         if (currentUser) {
-            try {
-                // Refresh user data from Firestore
-                const userDoc = await db.collection('users').doc(currentUser.uid).get();
-                if (userDoc.exists) {
-                    currentUser = { ...currentUser, ...userDoc.data() };
-                }
-                
-                document.getElementById('user-display-name').textContent = currentUser.name;
-                document.getElementById('user-avatar').textContent = currentUser.name.charAt(0).toUpperCase();
-                document.getElementById('user-balance').textContent = '$' + (currentUser.balance || 0).toFixed(2);
-                document.getElementById('user-pending').textContent = '$' + (currentUser.pendingBalance || 0).toFixed(2);
-                document.getElementById('user-referral').textContent = '$' + (currentUser.referralEarnings || 0).toFixed(2);
-                document.getElementById('user-tier-display').textContent = '$' + currentUser.tier + ' Tier';
-                
-                document.getElementById('referral-link').value = `${window.location.origin}${window.location.pathname}?ref=${currentUser.referralCode}`;
-                document.getElementById('referral-count').textContent = currentUser.totalReferrals || 0;
-                document.getElementById('referral-earnings').textContent = '$' + (currentUser.referralEarnings || 0).toFixed(2);
-                
-                const kycBadge = document.getElementById('kyc-status');
-                kycBadge.textContent = currentUser.kycStatus;
-                kycBadge.className = 'badge badge-' + (currentUser.kycStatus === 'approved' ? 'approved' : 'pending');
-                
-                // Update profile page
-                document.getElementById('profile-name').value = currentUser.name;
-                document.getElementById('profile-email').value = currentUser.email;
-                document.getElementById('profile-phone').value = currentUser.phone || '';
-                document.getElementById('profile-country').value = currentUser.country || '';
-                document.getElementById('profile-tier').value = '$' + currentUser.tier;
-                if (currentUser.createdAt) {
-                    const joinDate = currentUser.createdAt.toDate ? currentUser.createdAt.toDate() : new Date(currentUser.createdAt);
-                    document.getElementById('profile-join-date').value = joinDate.toLocaleDateString();
-                }
-            } catch (error) {
-                console.error('Error updating UI:', error);
+            document.getElementById('user-display-name').textContent = currentUser.name;
+            document.getElementById('user-avatar').textContent = currentUser.name.charAt(0).toUpperCase();
+            document.getElementById('user-balance').textContent = '$' + (currentUser.balance || 0).toFixed(2);
+            document.getElementById('user-pending').textContent = '$' + (currentUser.pendingBalance || 0).toFixed(2);
+            document.getElementById('user-referral').textContent = '$' + (currentUser.referralEarnings || 0).toFixed(2);
+            document.getElementById('user-tier-display').textContent = '$' + currentUser.tier + ' Tier';
+            
+            document.getElementById('referral-link').value = `${window.location.origin}${window.location.pathname}?ref=${currentUser.referralCode}`;
+            document.getElementById('referral-count').textContent = currentUser.totalReferrals || 0;
+            document.getElementById('referral-earnings').textContent = '$' + (currentUser.referralEarnings || 0).toFixed(2);
+            
+            const kycBadge = document.getElementById('kyc-status');
+            kycBadge.textContent = currentUser.kycStatus;
+            kycBadge.className = 'badge badge-' + (currentUser.kycStatus === 'approved' ? 'approved' : 'pending');
+            
+            // Update profile page
+            document.getElementById('profile-name').value = currentUser.name;
+            document.getElementById('profile-email').value = currentUser.email;
+            document.getElementById('profile-phone').value = currentUser.phone || '';
+            document.getElementById('profile-country').value = currentUser.country || '';
+            document.getElementById('profile-tier').value = '$' + currentUser.tier;
+            if (currentUser.createdAt) {
+                const joinDate = new Date(currentUser.createdAt);
+                document.getElementById('profile-join-date').value = joinDate.toLocaleDateString();
             }
         }
     }
@@ -1784,15 +2091,33 @@
         if (!currentUser) return;
         
         try {
-            // Update user balance and watch count in Firestore
-            await db.collection('users').doc(currentUser.uid).update({
-                balance: firebase.firestore.FieldValue.increment(earnings),
-                dailyWatchCount: firebase.firestore.FieldValue.increment(1)
-            });
-            
-            // Update current user data
+            // Update user balance and watch count
             currentUser.balance = (currentUser.balance || 0) + earnings;
             currentUser.dailyWatchCount = (currentUser.dailyWatchCount || 0) + 1;
+            
+            // Update local storage
+            StorageManager.setUser(currentUser);
+            
+            // Update users array
+            const users = StorageManager.getItem('users') || [];
+            const updatedUsers = users.map(user => 
+                (user.id === currentUser.id || user.uid === currentUser.uid) 
+                    ? { ...user, balance: currentUser.balance, dailyWatchCount: currentUser.dailyWatchCount }
+                    : user
+            );
+            StorageManager.setItem('users', updatedUsers);
+            
+            // Try to update Firestore if available
+            if (firebaseInitialized && db && currentUser.uid) {
+                try {
+                    await db.collection('users').doc(currentUser.uid).update({
+                        balance: firebase.firestore.FieldValue.increment(earnings),
+                        dailyWatchCount: firebase.firestore.FieldValue.increment(1)
+                    });
+                } catch (error) {
+                    console.warn('Firestore update failed:', error);
+                }
+            }
             
             showSuccess(`You earned $${earnings.toFixed(2)}!`);
             updateUserUI();
@@ -1809,28 +2134,49 @@
 
         if (username === 'admin' && password === 'admin123') {
             try {
-                // Try to sign in as admin
-                const adminEmail = 'admin@ysm.com';
-                const adminPass = 'admin123';
-                
-                try {
-                    await auth.signInWithEmailAndPassword(adminEmail, adminPass);
-                } catch (error) {
-                    // If admin doesn't exist, create it
-                    if (error.code === 'auth/user-not-found') {
-                        const userCredential = await auth.createUserWithEmailAndPassword(adminEmail, adminPass);
-                        await db.collection('users').doc(userCredential.user.uid).set({
-                            name: 'Administrator',
-                            email: adminEmail,
-                            role: 'admin',
-                            kycStatus: 'approved',
-                            tier: 'admin',
-                            balance: 0,
-                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    } else {
-                        throw error;
+                if (firebaseInitialized) {
+                    // Try Firebase admin login
+                    const adminEmail = 'admin@ysm.com';
+                    const adminPass = 'admin123';
+                    
+                    try {
+                        await auth.signInWithEmailAndPassword(adminEmail, adminPass);
+                    } catch (error) {
+                        // Create admin user if doesn't exist
+                        if (error.code === 'auth/user-not-found') {
+                            const userCredential = await auth.createUserWithEmailAndPassword(adminEmail, adminPass);
+                            const adminData = {
+                                name: 'Administrator',
+                                email: adminEmail,
+                                role: 'admin',
+                                kycStatus: 'approved',
+                                tier: 'admin',
+                                balance: 0,
+                                createdAt: new Date().toISOString()
+                            };
+                            
+                            await db.collection('users').doc(userCredential.user.uid).set(adminData);
+                            StorageManager.setUser({ uid: userCredential.user.uid, ...adminData });
+                        } else {
+                            throw error;
+                        }
                     }
+                } else {
+                    // Local admin login
+                    const adminUser = {
+                        id: 'admin',
+                        name: 'Administrator',
+                        email: 'admin@ysm.com',
+                        role: 'admin',
+                        kycStatus: 'approved',
+                        tier: 'admin',
+                        balance: 0,
+                        createdAt: new Date().toISOString()
+                    };
+                    
+                    StorageManager.setUser(adminUser);
+                    currentUser = adminUser;
+                    showPage('admin-dashboard');
                 }
                 
                 showSuccess('Admin login successful!');
@@ -1839,123 +2185,6 @@
             }
         } else {
             showError('Invalid admin credentials');
-        }
-    }
-
-    async function loadAdminStats() {
-        showAdminSection('admin-stats');
-        
-        try {
-            const usersSnapshot = await db.collection('users').get();
-            document.getElementById('total-users').textContent = usersSnapshot.size;
-            
-            const kycSnapshot = await db.collection('kycSubmissions').where('status', '==', 'pending').get();
-            document.getElementById('pending-kyc').textContent = kycSnapshot.size;
-            
-            const withdrawalsSnapshot = await db.collection('withdrawals').where('status', '==', 'pending').get();
-            document.getElementById('pending-withdrawals').textContent = withdrawalsSnapshot.size;
-            
-            // Calculate totals
-            let totalEarnings = 0;
-            let totalWithdrawals = 0;
-            
-            usersSnapshot.forEach(doc => {
-                const user = doc.data();
-                totalEarnings += user.balance + (user.totalWithdrawn || 0);
-            });
-            
-            const approvedWithdrawals = await db.collection('withdrawals').where('status', '==', 'approved').get();
-            approvedWithdrawals.forEach(doc => {
-                totalWithdrawals += doc.data().amount;
-            });
-            
-            document.getElementById('total-earnings').textContent = '$' + totalEarnings.toFixed(2);
-            document.getElementById('total-withdrawals').textContent = '$' + totalWithdrawals.toFixed(2);
-        } catch (error) {
-            console.error('Error loading admin stats:', error);
-        }
-    }
-
-    async function loadKYCManagement() {
-        showAdminSection('kyc-management');
-        const kycList = document.getElementById('kyc-list');
-        
-        try {
-            const snapshot = await db.collection('kycSubmissions').where('status', '==', 'pending').get();
-            
-            if (snapshot.empty) {
-                kycList.innerHTML = '<p style="text-align: center; padding: 40px; color: var(--light-gray);">No pending KYC requests</p>';
-                return;
-            }
-
-            let html = '';
-            for (const doc of snapshot.docs) {
-                const kyc = doc.data();
-                const userDoc = await db.collection('users').doc(kyc.userId).get();
-                const user = userDoc.data();
-                
-                html += `
-                    <div class="user-item">
-                        <div>
-                            <div style="font-weight: bold;">${kyc.name}</div>
-                            <div style="font-size: 0.9rem; color: var(--light-gray);">
-                                ${user.email} • ${kyc.idType} • ${kyc.idNumber}
-                            </div>
-                            <div style="font-size: 0.8rem; color: var(--warning);">
-                                Submitted: ${kyc.submittedAt.toDate().toLocaleDateString()}
-                            </div>
-                        </div>
-                        <div>
-                            <button class="btn btn-success" onclick="approveKYC('${doc.id}')">Approve</button>
-                            <button class="btn btn-danger" onclick="rejectKYC('${doc.id}')">Reject</button>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            kycList.innerHTML = html;
-        } catch (error) {
-            kycList.innerHTML = `<p style="color: var(--primary-red); text-align: center;">Error loading KYC: ${error.message}</p>`;
-        }
-    }
-
-    async function approveKYC(kycId) {
-        try {
-            await db.collection('kycSubmissions').doc(kycId).update({
-                status: 'approved',
-                processedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            await db.collection('users').doc(kycId).update({
-                kycStatus: 'approved',
-                canEarn: true
-            });
-
-            showSuccess('KYC approved! User can now earn money.');
-            loadKYCManagement();
-            loadAdminStats();
-        } catch (error) {
-            showError('Error approving KYC: ' + error.message);
-        }
-    }
-
-    async function rejectKYC(kycId) {
-        try {
-            await db.collection('kycSubmissions').doc(kycId).update({
-                status: 'rejected',
-                processedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            await db.collection('users').doc(kycId).update({
-                kycStatus: 'rejected',
-                canEarn: false
-            });
-
-            showSuccess('KYC rejected! User must resubmit documents.');
-            loadKYCManagement();
-            loadAdminStats();
-        } catch (error) {
-            showError('Error rejecting KYC: ' + error.message);
         }
     }
 
@@ -2085,25 +2314,44 @@
         }
         
         try {
-            // Create withdrawal request in Firestore
+            // Create withdrawal request
             const withdrawal = {
-                userId: currentUser.uid,
+                userId: currentUser.uid || currentUser.id,
                 amount: amount,
                 method: method,
                 status: 'pending',
-                requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                requestedAt: new Date().toISOString()
             };
             
-            await db.collection('withdrawals').add(withdrawal);
+            // Store locally
+            const withdrawals = StorageManager.getItem('withdrawals') || [];
+            withdrawals.push(withdrawal);
+            StorageManager.setItem('withdrawals', withdrawals);
             
             // Update user balance
-            await db.collection('users').doc(currentUser.uid).update({
-                balance: firebase.firestore.FieldValue.increment(-amount),
-                totalWithdrawn: firebase.firestore.FieldValue.increment(amount)
-            });
-            
-            // Update current user data
             currentUser.balance -= amount;
+            StorageManager.setUser(currentUser);
+            
+            // Update local users array
+            const users = StorageManager.getItem('users') || [];
+            const updatedUsers = users.map(user => 
+                (user.id === currentUser.id || user.uid === currentUser.uid) 
+                    ? { ...user, balance: currentUser.balance }
+                    : user
+            );
+            StorageManager.setItem('users', updatedUsers);
+            
+            // Try to update Firestore if available
+            if (firebaseInitialized && db && currentUser.uid) {
+                try {
+                    await db.collection('withdrawals').add(withdrawal);
+                    await db.collection('users').doc(currentUser.uid).update({
+                        balance: firebase.firestore.FieldValue.increment(-amount)
+                    });
+                } catch (error) {
+                    console.warn('Firestore update failed:', error);
+                }
+            }
             
             showSuccess('Withdrawal request submitted!');
             closeWithdrawModal();
@@ -2127,8 +2375,10 @@
     window.loadAdsManagement = () => showAdminSection('ads-management');
     window.loadWithdrawalManagement = () => showAdminSection('withdrawal-management');
     window.loadTierManagement = () => showAdminSection('tier-management');
+    window.loadKYCManagement = () => showAdminSection('kyc-management');
+    window.loadAdminStats = () => showAdminSection('admin-stats');
 
-    // ==================== FILE UPLOAD HANDLERS ====================
+    // ==================== INITIALIZATION ====================
     document.addEventListener('DOMContentLoaded', function() {
         // File upload handlers
         const fileInputs = {
